@@ -1,10 +1,23 @@
+/* eslint-disable prettier/prettier */
+// eslint-disable-next-line prettier/prettier
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../lib/prisma'
 
 export async function memoriesRoutes(app: FastifyInstance) {
-  app.get('/memories', async () => {
+  // antes de executar cada uma das rotas, verifique se ela está autenticada
+  app.addHook('preHandler', async (request) => {
+    await request.jwtVerify()
+  })
+
+  app.get('/memories', async (request) => {
+
+    const { sub } = request.user
+
     const memories = await prisma.memory.findMany({
+      where: {
+        userId: sub
+      },
       orderBy: {
         createdAt: 'asc',
       },
@@ -19,7 +32,7 @@ export async function memoriesRoutes(app: FastifyInstance) {
     })
   })
 
-  app.get('/memories/:id', async (request) => {
+  app.get('/memories/:id', async (request, reply) => {
     const paramsSchema = z.object({
       id: z.string().uuid(),
     })
@@ -32,6 +45,10 @@ export async function memoriesRoutes(app: FastifyInstance) {
       },
     })
 
+    if(!memory.isPublic && memory.userId !== request.user.sub){
+        return reply.status(401).send()
+    }
+
     return memory
   })
 
@@ -40,7 +57,6 @@ export async function memoriesRoutes(app: FastifyInstance) {
       content: z.string(),
       coverUrl: z.string(),
       isPublic: z.coerce.boolean().default(false),
-      
     })
 
     const { content, isPublic, coverUrl } = bodySchema.parse(request.body)
@@ -50,14 +66,14 @@ export async function memoriesRoutes(app: FastifyInstance) {
         content,
         coverUrl,
         isPublic,
-        userId: '3c786731-ad99-4bcc-b4d8-b3c2bc96c360'
-      }
+        userId: request.user.sub,
+      },
     })
 
     return memory
   })
 
-  app.put('/memories/:id', async (request) => {
+  app.put('/memories/:id', async (request, reply) => {
     const paramsSchema = z.object({
       id: z.string().uuid(),
     })
@@ -68,37 +84,57 @@ export async function memoriesRoutes(app: FastifyInstance) {
       content: z.string(),
       coverUrl: z.string(),
       isPublic: z.coerce.boolean().default(false),
-      
     })
 
     const { content, isPublic, coverUrl } = bodySchema.parse(request.body)
 
-    const updatedMemory = await prisma.memory.update({
+
+    const memory = await prisma.memory.findUniqueOrThrow({
       where: {
         id
+      }
+    })
+
+    if(memory.userId !== request.user.sub){
+      return reply.status(401).send()
+    }
+
+    const updatedMemory = await prisma.memory.update({
+      where: {
+        id,
       },
       data: {
         content,
         coverUrl,
-        isPublic
-      }
+        isPublic,
+      },
     })
 
     return updatedMemory
   })
 
-  app.delete('/memories/:id', async (request) => {
+  app.delete('/memories/:id', async (request, reply) => {
     const paramsSchema = z.object({
       id: z.string().uuid(),
     })
 
     const { id } = paramsSchema.parse(request.params)
 
-      await prisma.memory.delete({
+    
+    const memory = await prisma.memory.findUniqueOrThrow({
+      where: {
+        id
+      }
+    })
+
+    if(memory.userId !== request.user.sub){
+      return reply.status(401).send()
+    }
+
+    await prisma.memory.delete({
       where: {
         id,
       },
     })
-
   })
 }
